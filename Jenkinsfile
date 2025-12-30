@@ -9,7 +9,7 @@ pipeline {
     // Flask app port (do NOT use 8080 because Jenkins is already on 8080)
     APP_PORT = "5000"
     // Where Jenkins will keep the running app venv + pid file on the Jenkins machine
-    DEPLOY_DIR = "%WORKSPACE%\\_deploy"
+    DEPLOY_DIR = "${WORKSPACE}\\_deploy"
   }
 
   stages {
