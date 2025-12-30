@@ -18,5 +18,6 @@ def create_app() -> Flask:
 
 if __name__ == "__main__":
     port = int(os.getenv("APP_PORT", "5000"))
-    create_app().run(host="0.0.0.0", port=port)
+    # Explicitly disable debug/reloader to avoid extra child processes when run under CI/CD
+    create_app().run(host="0.0.0.0", port=port, debug=False, use_reloader=False)
 

@@ -45,14 +45,14 @@ pipeline {
 
           $venvPath = Join-Path $env:DEPLOY_DIR "venv"
           $pythonExe = Join-Path $venvPath "Scripts\\python.exe"
-          $pipExe = Join-Path $venvPath "Scripts\\pip.exe"
 
           if (!(Test-Path $pythonExe)) {
             py -m venv $venvPath
           }
 
-          & $pipExe install --no-input --upgrade pip
-          & $pipExe install --no-input -r (Join-Path $env:DEPLOY_DIR "requirements.txt")
+          # Use python -m pip (more reliable than calling pip.exe directly)
+          & $pythonExe -m pip install --no-input --upgrade pip
+          & $pythonExe -m pip install --no-input -r (Join-Path $env:DEPLOY_DIR "requirements.txt")
 
           # Stop previous process (if any)
           $pidFile = Join-Path $env:DEPLOY_DIR "app.pid"
@@ -69,18 +69,49 @@ pipeline {
           }
 
           # Start app in background (so Jenkins job can finish while app keeps running)
-          $env:APP_PORT = "$env:APP_PORT"
+          # Prevent Jenkins from killing the deployed process after the step ends
+          # (Jenkins process tree killer targets processes with the build cookie)
+          $oldCookie = $env:JENKINS_NODE_COOKIE
+          $env:JENKINS_NODE_COOKIE = "dontKillMe"
+
+          $stdoutLog = Join-Path $env:DEPLOY_DIR "app.stdout.log"
+          $stderrLog = Join-Path $env:DEPLOY_DIR "app.stderr.log"
+
           $startInfo = @{
             FilePath = $pythonExe
             ArgumentList = @("app.py")
             WorkingDirectory = $env:DEPLOY_DIR
             WindowStyle = "Hidden"
             PassThru = $true
+            RedirectStandardOutput = $stdoutLog
+            RedirectStandardError = $stderrLog
           }
           $p = Start-Process @startInfo
 
+          # Restore cookie for the rest of the build
+          $env:JENKINS_NODE_COOKIE = $oldCookie
+
           Set-Content -Path $pidFile -Value $p.Id
           Write-Host ("Started Flask app pid={0} on port {1}" -f $p.Id, $env:APP_PORT)
+
+          # Health check: fail the build if the app is not actually listening
+          $url = "http://localhost:$env:APP_PORT/health"
+          $ok = $false
+          for ($i = 0; $i -lt 20; $i++) {
+            try {
+              $r = Invoke-RestMethod -Uri $url -TimeoutSec 2
+              if ($r.status -eq "healthy") { $ok = $true; break }
+            } catch {
+              Start-Sleep -Seconds 1
+            }
+          }
+
+          if (-not $ok) {
+            Write-Host "Health check failed: $url"
+            if (Test-Path $stdoutLog) { Write-Host "---- stdout (tail) ----"; Get-Content $stdoutLog -Tail 200 }
+            if (Test-Path $stderrLog) { Write-Host "---- stderr (tail) ----"; Get-Content $stderrLog -Tail 200 }
+            throw "App did not become healthy on port $env:APP_PORT"
+          }
         '''
       }
     }
