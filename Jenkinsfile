@@ -26,6 +26,7 @@ pipeline {
           py -m venv .venv
           call .venv\\Scripts\\activate
           pip install -r requirements.txt -r requirements-dev.txt
+          set PYTHONPATH=%CD%
           pytest -q
         '''
       }
